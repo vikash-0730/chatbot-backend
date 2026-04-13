@@ -4,35 +4,74 @@ from model import predict_with_confidence
 from responses import responses
 from deep_translator import GoogleTranslator
 
+import firebase_admin
+from firebase_admin import credentials, db
+
 app = Flask(__name__)
 CORS(app)
 
-# 🔥 Translation function
+# 🔥 Firebase init
+cred = credentials.Certificate("serviceAccountKey.json")
+
+firebase_admin.initialize_app(cred, {
+    'databaseURL': 'https://ai-chatbot-6b2d0-default-rtdb.firebaseio.com'
+})
+
+# 🔥 Session
+user_sessions = {}
+
+# 🔥 HISTORY LIMIT (IMPORTANT 🔥)
+MAX_HISTORY = 5
+
+# 🔥 Hinglish Dictionary
+hinglish_map = {
+    "pesa": "payment",
+    "paisa": "payment",
+    "paise": "payment",
+    "money": "payment",
+
+    "oder": "order",
+    "ordr": "order",
+
+    "wapas": "refund",
+    "return": "refund"
+}
+
+def normalize_text(text):
+    words = text.lower().split()
+    return " ".join([hinglish_map.get(w, w) for w in words])
+
+
+def get_user_by_phone(phone):
+    try:
+        phone = str(phone).strip().replace("+91", "")
+        return db.reference(f'users/{phone}').get()
+    except:
+        return None
+
+
 def translate_to_english(text):
     try:
         return GoogleTranslator(source='auto', target='en').translate(text)
-    except Exception:
+    except:
         return text
 
-# 🔥 Keyword override (fix for ML mistakes)
-def keyword_override(text):
+
+def smart_intent(text):
     text = text.lower()
 
-    payment_keywords = ["paisa", "payment", "deduct", "upi", "transaction", "money"]
-    refund_keywords = ["refund", "return", "wapas"]
-    order_keywords = ["order", "parcel", "delivery", "track"]
+    # 🔥 ORDER HISTORY (highest priority)
+    if any(word in text for word in ["history", "previous", "last"]):
+        return "order_history"
 
-    for word in payment_keywords:
-        if word in text:
-            return "payment_issue"
+    if "refund" in text:
+        return "refund"
 
-    for word in refund_keywords:
-        if word in text:
-            return "refund"
+    if any(word in text for word in ["payment", "upi", "transaction", "deduct"]):
+        return "payment_issue"
 
-    for word in order_keywords:
-        if word in text:
-            return "order_status"
+    if any(word in text for word in ["order", "delivery", "parcel", "track"]):
+        return "order_status"
 
     return None
 
@@ -40,50 +79,103 @@ def keyword_override(text):
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
-        user_msg = request.json.get("message")
+        data = request.json
+        user_msg = data.get("message")
 
         if not user_msg:
             return jsonify({"response": "Please enter a message"})
 
-        # 🔥 Step 1: Translate
-        translated_msg = translate_to_english(user_msg)
+        user_msg = user_msg.strip()
 
-        # 🔥 Step 2: Keyword override first
-        override_intent = keyword_override(user_msg)
+        # =====================================================
+        # 🔥 PHONE INPUT
+        # =====================================================
+        if user_msg.isdigit() and len(user_msg) >= 10:
 
-        if override_intent:
-            intent = override_intent
-            confidence = 1.0
-        else:
-            # 🔥 Step 3: ML prediction
+            session = user_sessions.get("temp")
+
+            if not session:
+                return jsonify({"response": "Please ask your query first."})
+
+            intent = session["intent"]
+            phone = user_msg
+
+            user_data = get_user_by_phone(phone)
+
+            if not user_data:
+                return jsonify({"response": "User not found."})
+
+            name = user_data.get("name", "User")
+
+            # 🔥 ORDER STATUS
+            if intent == "order_status":
+                order = user_data.get("order", {})
+                reply = f"{name}, your order {order.get('item')} is {user_data.get('order_status')} 🚚"
+
+            # 🔥 PAYMENT
+            elif intent == "payment_issue":
+                reply = f"{name}, your payment is {user_data.get('payment_status')} via {user_data.get('payment_mode')} 💳"
+
+            # 🔥 REFUND
+            elif intent == "refund":
+                reply = f"{name}, refund for order {user_data.get('order', {}).get('id')} will be processed 💰"
+
+            # 🔥 ORDER HISTORY (LIMITED 🔥)
+            elif intent == "order_history":
+                history = user_data.get("order_history", [])
+
+                if history:
+                    limited_history = history[-MAX_HISTORY:]  # 🔥 last 5 only
+                    reply = f"{name}, your last {len(limited_history)} orders are: {', '.join(limited_history)} 📦"
+                else:
+                    reply = f"{name}, you have no previous orders."
+
+            user_sessions.clear()
+            return jsonify({"response": reply})
+
+        # =====================================================
+        # 🔥 NORMAL FLOW
+        # =====================================================
+
+        normalized_msg = normalize_text(user_msg)
+        intent = smart_intent(normalized_msg)
+
+        if not intent:
+            translated_msg = translate_to_english(normalized_msg)
             intent, confidence = predict_with_confidence(translated_msg)
+        else:
+            confidence = 1.0
 
-        # 🔥 Debug logs (console me dikhega)
         print("User:", user_msg)
-        print("Translated:", translated_msg)
-        print("Intent:", intent, "Confidence:", confidence)
+        print("Normalized:", normalized_msg)
+        print("Intent:", intent)
 
-        # 🔥 Step 4: Low confidence fallback
+        # 🔥 DATA INTENTS
+        if intent in ["order_status", "payment_issue", "refund", "order_history"]:
+            user_sessions["temp"] = {"intent": intent}
+            return jsonify({"response": "Please provide your phone number to check details."})
+
+        # 🔥 LOW CONFIDENCE
         if confidence < 0.3:
             return jsonify({
                 "response": "I didn’t understand. Try asking about orders, refund or payment."
             })
 
-        # 🔥 Step 5: Get response
+        # 🔥 NORMAL CHAT
         reply = responses.get(intent, "Something went wrong")
 
-        return jsonify({
-            "response": reply,
-            "intent": intent,
-            "confidence": float(confidence),
-            "translated": translated_msg
-        })
+        return jsonify({"response": reply})
 
     except Exception as e:
         return jsonify({
-            "response": "Server error, please try again later.",
+            "response": "Server error",
             "error": str(e)
         })
+
+
+@app.route("/test-user/<phone>")
+def test_user(phone):
+    return jsonify(get_user_by_phone(phone))
 
 
 if __name__ == "__main__":

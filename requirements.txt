@@ -1,3 +1,6 @@
-flask
+Flask
 flask-cors
+firebase-admin
+deep-translator
 scikit-learn
+numpy
