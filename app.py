@@ -14,7 +14,7 @@ CORS(app)
 
 # 🔥 Firebase init
 firebase_key = json.loads(os.environ.get("FIREBASE_KEY"))
-
+cred = credentials.Certificate(firebase_key)
 firebase_admin.initialize_app(cred, {
     'databaseURL': 'https://ai-chatbot-6b2d0-default-rtdb.firebaseio.com'
 })
@@ -181,5 +181,4 @@ def test_user(phone):
 
 
 if __name__ == "__main__":
-     port = int(os.environ.get("PORT", 5000))
-     app.run(host="0.0.0.0", port=port)
+     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=False)

@@ -4,3 +4,4 @@ firebase-admin
 deep-translator
 scikit-learn
 numpy
+gunicorn
