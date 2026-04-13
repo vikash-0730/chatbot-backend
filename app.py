@@ -3,15 +3,17 @@ from flask_cors import CORS
 from model import predict_with_confidence
 from responses import responses
 from deep_translator import GoogleTranslator
+import os
 
 import firebase_admin
 from firebase_admin import credentials, db
+import json
 
 app = Flask(__name__)
 CORS(app)
 
 # 🔥 Firebase init
-cred = credentials.Certificate("serviceAccountKey.json")
+firebase_key = json.loads(os.environ.get("FIREBASE_KEY"))
 
 firebase_admin.initialize_app(cred, {
     'databaseURL': 'https://ai-chatbot-6b2d0-default-rtdb.firebaseio.com'
