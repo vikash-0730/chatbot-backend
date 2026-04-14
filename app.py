@@ -12,20 +12,19 @@ import json
 app = Flask(__name__)
 CORS(app)
 
-# 🔥 Firebase init
+
 firebase_key = json.loads(os.environ.get("FIREBASE_KEY"))
 cred = credentials.Certificate(firebase_key)
 firebase_admin.initialize_app(cred, {
     'databaseURL': 'https://ai-chatbot-6b2d0-default-rtdb.firebaseio.com'
 })
 
-# 🔥 Session
+
 user_sessions = {}
 
-# 🔥 HISTORY LIMIT (IMPORTANT 🔥)
+
 MAX_HISTORY = 5
 
-# 🔥 Hinglish Dictionary
 hinglish_map = {
     "pesa": "payment",
     "paisa": "payment",
@@ -89,9 +88,6 @@ def chat():
 
         user_msg = user_msg.strip()
 
-        # =====================================================
-        # 🔥 PHONE INPUT
-        # =====================================================
         if user_msg.isdigit() and len(user_msg) >= 10:
 
             session = user_sessions.get("temp")
@@ -109,20 +105,20 @@ def chat():
 
             name = user_data.get("name", "User")
 
-            # 🔥 ORDER STATUS
+            
             if intent == "order_status":
                 order = user_data.get("order", {})
                 reply = f"{name}, your order {order.get('item')} is {user_data.get('order_status')} 🚚"
 
-            # 🔥 PAYMENT
+            
             elif intent == "payment_issue":
                 reply = f"{name}, your payment is {user_data.get('payment_status')} via {user_data.get('payment_mode')} 💳"
 
-            # 🔥 REFUND
+            
             elif intent == "refund":
                 reply = f"{name}, refund for order {user_data.get('order', {}).get('id')} will be processed 💰"
 
-            # 🔥 ORDER HISTORY (LIMITED 🔥)
+            
             elif intent == "order_history":
                 history = user_data.get("order_history", [])
 
@@ -134,10 +130,6 @@ def chat():
 
             user_sessions.clear()
             return jsonify({"response": reply})
-
-        # =====================================================
-        # 🔥 NORMAL FLOW
-        # =====================================================
 
         normalized_msg = normalize_text(user_msg)
         intent = smart_intent(normalized_msg)
@@ -152,18 +144,18 @@ def chat():
         print("Normalized:", normalized_msg)
         print("Intent:", intent)
 
-        # 🔥 DATA INTENTS
+        
         if intent in ["order_status", "payment_issue", "refund", "order_history"]:
             user_sessions["temp"] = {"intent": intent}
             return jsonify({"response": "Please provide your phone number to check details."})
 
-        # 🔥 LOW CONFIDENCE
+        
         if confidence < 0.3:
             return jsonify({
                 "response": "I didn’t understand. Try asking about orders, refund or payment."
             })
 
-        # 🔥 NORMAL CHAT
+        
         reply = responses.get(intent, "Something went wrong")
 
         return jsonify({"response": reply})
